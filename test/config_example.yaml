@@ -1,0 +1,40 @@
+DEFAULT:
+  SOURCE: '/home/ubuntu/Data/TestingMicroscopy'
+  root_path: '/home/ubuntu/Data/TestingMicroscopy/DPM4X/'
+  DESTINATION: '/home/tzui/Project/TestingMicroscopy/Dataset/paired_images/'
+  N_resolution: 8 # 8x super-resolution
+  upsample_params: # upsample size, same with dx if no upsample
+    size: [32, 256, 256]
+  patch_range: # coordinates (Z, X, Y) of ROI before upsampling
+    d0: [189, 120, 400]
+    dx: [32, 256, 256]
+  assemble_params:
+    C: [32, 32, 32] # cropped pixels
+    S: [64, 64, 64] # overlapping pixels
+    dx_shape: [ 32, 256, 256 ] # (dz, dx, dy) inference size # upsample size (60, 128, 384) > (384, 128, 384)
+#    weight_shape: [ 192, 192, 192 ] # shape of the weight = dx_shape - cropping
+    weight_method: "cross"
+    zrange: [ 0, 200] # (z0, x0, y0), (z0 + dz, x0 + dx, y0 + dy), coordinates after upsampling
+    xrange: [ 0, 769]
+    yrange: [ 0, 769]
+  norm_method: [ "exp", "11" ]  # normalization method for each data in the list
+  trd: [ [ 100, 424 ], [ 0, 4 ] ] # this is for standard normalization (min() and max())
+
+VMAT:
+  dataset: "DPM4X"
+  prj: "DPM4X/ae/cut/1/"
+  epoch: 800
+  model_type: AE
+  hbranchz: true
+  image_path: ["/ori/3-2ROI000.tif","/ft0/3-2ROI000.tif"]
+#  image_list_path: null # ["ori", "ft0"]
+  hbranch_path: "/home/tzui/Project/TestingMicroscopy/Dataset/paired_images/DPM4X/hbranch"
+DPM:
+  dataset: "DPM4X"
+  prj: "DPM4X/ae/cut/1/"
+  epoch: 800
+  model_type: AE
+  hbranchz: true
+  image_path: ["/ori/3-2ROI000.tif","/ft0/3-2ROI000.tif"]
+#  image_list_path: null # ["ori", "ft0"]
+  hbranch_path: "/home/tzui/Project/TestingMicroscopy/Dataset/paired_images/DPM4X/hbranch"
