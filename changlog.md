@@ -10,6 +10,9 @@
     - need to fix exponential normalization (norm_method = exp w/ exp_trd and exp_ftr)
     - sync transfer save image issue
 
+## [0.1.5] -2025-02-06
+    - Correct readme
+
 ## [0.1.4] - 2025-02-01
     - Remove cpu/gpu async transfer avoid save image issue
     - Add flag --augmentation to choose do TTA while encode or decode (decode will be faster)

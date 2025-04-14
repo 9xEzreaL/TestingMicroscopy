@@ -282,23 +282,24 @@ class MicroTest:
                 x0.append(img)
 
         elif hbranch_path:
-            class HbranchDataset(Dataset):
-                def __init__(self, folder):
-                    # 搜尋資料夾下所有 npy 檔案，並根據檔名排序（你也可以根據需要修改排序規則）
-                    self.files = sorted(glob.glob(os.path.join(folder, "*.npy")))
-                    if len(self.files) == 0:
-                        raise ValueError(f"No .npy files found in {folder}")
+            return np.load(os.path.join(hbranch_path, "latent_hbranch.npy")).astype(np.float32)
+            # class HbranchDataset(Dataset):
+            #     def __init__(self, folder):
+            #         # 搜尋資料夾下所有 npy 檔案，並根據檔名排序（你也可以根據需要修改排序規則）
+            #         self.files = sorted(glob.glob(os.path.join(folder, "*.npy")))
+            #         if len(self.files) == 0:
+            #             raise ValueError(f"No .npy files found in {folder}")
+            #
+            #     def __len__(self):
+            #         return len(self.files)
+            #
+            #     def __getitem__(self, idx):
+            #         # 載入 npy 檔案，可以視需要加入資料轉換（例如轉成 torch.Tensor）
+            #         return np.load(self.files[idx], allow_pickle=True), self.files[idx]
 
-                def __len__(self):
-                    return len(self.files)
-
-                def __getitem__(self, idx):
-                    # 載入 npy 檔案，可以視需要加入資料轉換（例如轉成 torch.Tensor）
-                    return np.load(self.files[idx], allow_pickle=True), self.files[idx]
-
-            hbranch_dataset = HbranchDataset(hbranch_path)
+            # hbranch_dataset = HbranchDataset(hbranch_path)
             # 這裡預設 batch_size 為 1，你可以根據需求調整 batch_size 與 shuffle 設定
-            x0 = DataLoader(hbranch_dataset, batch_size=1, shuffle=False, num_workers=16, pin_memory=True)
+            # x0 = DataLoader(hbranch_dataset, batch_size=1, shuffle=False, num_workers=16, pin_memory=True)
 
         else:
             raise ValueError("No valid image path provided.")
@@ -354,13 +355,13 @@ class MicroTest:
             recreate_volume_folder(
                 destination=os.path.join(self.config['DESTINATION'], self.kwargs["dataset"], self.args.roi),
                 folder=["recon", "ori", "hbranch"])
-            self._test_over_ae_enc_volumne(x0, dx, dy, dz, zrange=zrange, xrange=xrange, yrange=yrange,
+            self._test_over_ae_enc_volumne_new(x0, dx, dy, dz, zrange=zrange, xrange=xrange, yrange=yrange,
                                        destination=os.path.join(self.config['DESTINATION'], self.kwargs["dataset"], self.args.roi))
         elif mode == "decode":
             recreate_volume_folder(
                 destination=os.path.join(self.config['DESTINATION'], self.kwargs["dataset"], self.args.roi),
                 folder=["seg", "xy"])
-            self._test_over_ae_dec_volumne(x0,
+            self._test_over_ae_dec_volumne_new(x0,
                                            destination=os.path.join(self.config['DESTINATION'], self.kwargs["dataset"], self.args.roi),
                                            input_augmentation=input_augmentation)
 
@@ -824,6 +825,27 @@ class MicroTest:
         # 確保所有寫入任務完成
         write_queue.join()
 
+    def _test_over_ae_enc_volumne_new(self, x0, dx, dy, dz, zrange, xrange, yrange, destination):
+        N_x = len(xrange)
+        N_z = len(zrange)
+        N_y = len(yrange)
+
+        output = np.empty((32, 4, 32, 32, N_z, N_x, N_y))
+
+        # try:
+        for idx, ix in enumerate(xrange):
+            for idz, iz in tqdm(enumerate(zrange)):
+                for idy, iy in enumerate(yrange):
+                    # 設置 patch_range
+                    self.kwargs['patch_range']['d0'] = [iz, ix, iy]
+                    self.kwargs['patch_range']['dx'] = [dz, dx, dy]
+
+                    # 模型推理
+                    reconstructions, ori, hbranch = self.test_ae_encode(x0)
+
+                    output[:, :, :, :, idz, idx, idy] = hbranch
+        np.save(os.path.join(destination, "hbranch", f"latent_hbranch.npy"), output)
+
     def _test_over_ae_dec_volumne(self, x0, destination, input_augmentation=[None]):
         # 初始化寫入隊列和寫入線程
         write_queue = queue.Queue(maxsize=100)  # 控制隊列大小以限制內存使用
@@ -867,6 +889,127 @@ class MicroTest:
 
         # 確保所有寫入任務完成
         write_queue.join()
+
+    def _test_over_ae_dec_volumne_new(self, x0, destination, input_augmentation=[None]):
+        C0, C1, C2 = self.kwargs['assemble_params']['C']  # C = kwargs['assemble_params']['C']
+        S0, S1, S2 = self.kwargs['assemble_params']['S']  # S = kwargs['assemble_params']['S']
+
+        current_x_position = 0
+        last_block = None
+        os.makedirs(os.path.join(destination, "xy_assemble"), exist_ok=True)
+
+        def save_block_to_disk(block, start_x, end_x):
+            for x_idx in range(start_x, end_x):
+                slice_2d = block[x_idx - start_x, :, :]
+
+                tiff.imwrite(os.path.join(destination, f'slice_x_{current_x_position + x_idx}.tif'),
+                             slice_2d.astype(np.dtype(self.save_image_datatype)))
+
+        def process_block(current_block, is_first=False):
+            nonlocal current_x_position, last_block
+
+            if is_first:
+                save_block_to_disk(current_block[:-S1], 0, current_block.shape[0] - S1)
+                current_x_position += current_block.shape[0] - S1
+                return current_block[-S1:]
+            else:
+                # 處理重疊區域
+                overlap_region = last_block + current_block[:S1]  # current_block[:S1] = current_block[:S1, :, :]
+                save_block_to_disk(overlap_region, 0, S1)
+                current_x_position += S1
+                # 處理非重疊區域
+                non_overlap = current_block[S1:]
+                if non_overlap.shape[0] > S1:  # 如果剩餘部分大於S1，儲存除了最後S1的部分
+                    save_block_to_disk(non_overlap[:-S1], 0, non_overlap.shape[0] - S1)
+                    current_x_position += non_overlap.shape[0] - S1
+                    return non_overlap[-S1:]  # 保留最後S1部分
+                return non_overlap  # 如果剩餘部分小於等於S1，全部保留
+
+        z, x, y = x0.shape[4:]
+
+        if not torch.is_tensor(x0):
+            x0 = torch.from_numpy(x0)
+        else:
+            x0 = x0
+        # time.sleep(10)
+        if self.args.fp16 and self.args.gpu:
+            x0 = x0.half()
+        
+        x0 = x0.cuda()
+        # print(x0.device)
+        # time.sleep(10)
+        # assert 0
+        fixed_w = create_tapered_weight(S0, S1, S2, 1, 1, 1, size=self.kwargs['assemble_params']['weight_shape'],
+                                  edge_size=64)
+        T1 = time.time()
+        for nx in tqdm(range(x)):
+            one_column = []
+            for nz in range(z):
+                one_row = []
+                for ny in range(y):
+                    input = x0[:16, :, :, :, nz, nx, ny]
+                    # get weight
+                    if nx == x - 1:
+                        nx = -1
+                    if ny == y - 1:
+                        ny = -1
+                    if nz == z - 1:
+                        nz = -1
+                    t1 = time.time()
+                    if (nz == 0 or nz == -1) or (nx == 0 or nx == -1) or (ny == 0 or ny == -1):
+                        w = create_tapered_weight(S0, S1, S2, nz, nx, ny, size=self.kwargs['assemble_params']['weight_shape'],
+                                                  edge_size=64)
+                    else:
+                        w = fixed_w
+                    t2 = time.time()
+                    print("create_tapered_weight : ", t2-t1)
+                    with torch.cuda.amp.autocast():
+                        out_all, out_seg_all = self.test_ae_decode(input, input_augmentation)
+                    t3 = time.time()
+                    print("test_ae_decode : ", t3-t2)
+                    # out_all_mean = self.normalization.backward_normalization(out_all.mean(axis=3),
+                    #                                                          self.kwargs["norm_method"][0],
+                    #                                                          self.kwargs['exp_trd'][0],
+                    #                                                          self.kwargs['trd'][0])
+                    # out_all_std = self.normalization.backward_normalization(out_all.std(axis=3),
+                    #                                                         self.kwargs["norm_method"][0],
+                    #                                                         self.kwargs['exp_trd'][0],
+                    #                                                         self.kwargs['trd'][0])
+                    t4 = time.time()
+                    print("backward_normalization : ", t4-t3)
+                    cropped = out_all.mean(axis=3)[C0:-C0, C1:-C1, C2:-C2]
+                    # cropped = out_all_mean[C0:-C0, C1:-C1, C2:-C2]
+                    cropped = np.multiply(cropped, w)
+                    t5 = time.time()
+                    print("multiply : ", t5-t4)
+                    if len(one_row) > 0:
+                        one_row[-1][:, :, -S2:] = one_row[-1][:, :, -S2:] + cropped[:, :, :S2]
+                        one_row.append(cropped[:, :, S2:])
+                    else:
+                        one_row.append(cropped)
+
+                one_row = np.concatenate(one_row, axis=2)  # (Z, X, Y)
+                one_row = np.transpose(one_row, (1, 0, 2))  # (X, Z, Y)
+
+                if len(one_column) > 0:
+                    one_column[-1][:, -S0:, :] = one_column[-1][:, -S0:, :] + one_row[:, :S0, :]
+                    one_column.append(one_row[:, S0:, :])
+                else:
+                    one_column.append(one_row)
+
+            one_column = np.concatenate(one_column, axis=1).astype(np.float32)
+
+            if last_block is None:
+                last_block = process_block(one_column, is_first=True)
+            else:
+                last_block = process_block(one_column)
+        T2 = time.time()
+        print("all finished : ", T2-T1)
+        if last_block is not None:
+            save_block_to_disk(last_block, 0, last_block.shape[0])
+        T3 = time.time()
+        print("save_block_to_disk : ", T3-T2)
+
 
     def _test_over_volumne(self, x0, dx, dy, dz, zrange, xrange, yrange, destination,
                            input_augmentation=[None]):
@@ -945,7 +1088,6 @@ if __name__ == "__main__":
 
     # 1. Here you can test model with single path image then save it
     # out, patch, out_seg = tester.test_model(x0, [None, 'transpose', 'flipX', 'flipY'])
-    #
     # tester.save_images("out.tif", out.mean(axis=3), (1, 0, 2), norm_method=tester.kwargs["norm_method"][0], exp_trd=tester.kwargs['exp_trd'][0],
     #                     trd=tester.kwargs['trd'][0]) # norm_method, exp_trd, trd
     # tester.save_images("out_seg.tif", out_seg, (1, 0, 2), norm_method="11", trd=[0, 255])
@@ -957,29 +1099,29 @@ if __name__ == "__main__":
     # 2. Do test assemble then save patch
     # test_assemble -> mode : encode, decode, full
 
-    tester.test_assemble(x0, mode="full", input_augmentation=[None, 'transpose', 'flipX', 'flipY']) #
+    tester.test_assemble(x0, mode="decode", input_augmentation=[None, 'transpose', 'flipX', 'flipY'][:2]) #
 
     # 3. show or save assemble big image from pattch
-    zrange = range(*tester.kwargs['assemble_params']['zrange'])
-    xrange = range(*tester.kwargs['assemble_params']['xrange'])
-    yrange = range(*tester.kwargs['assemble_params']['yrange'])
-
-    tester.show_or_save_assemble_microscopy(zrange=zrange, xrange=xrange, yrange=yrange,
-                                            source=os.path.join(tester.config['DESTINATION'], tester.kwargs["dataset"], tester.args.roi, 'xy/'),
-                                            # output_path="tmp_xy.tif",
-                                            output_path=os.path.join(tester.config['DESTINATION'], tester.kwargs["dataset"], tester.args.roi, 'xy_assemble')#
-                                            )
-
-    tester.show_or_save_assemble_microscopy(zrange=zrange, xrange=xrange, yrange=yrange,
-                                            source=os.path.join(tester.config['DESTINATION'], tester.kwargs["dataset"], tester.args.roi, 'ori/'),
-                                            # output_path="tmp_ori.tif",
-                                            output_path=os.path.join(tester.config['DESTINATION'], tester.kwargs["dataset"], tester.args.roi, 'ori_assemble')
-                                            )
-
-    tester.show_or_save_assemble_microscopy(zrange=zrange, xrange=xrange, yrange=yrange,
-                                            source=os.path.join(tester.config['DESTINATION'], tester.kwargs["dataset"], tester.args.roi, 'seg/'),
-                                            output_path=os.path.join(tester.config['DESTINATION'], tester.kwargs["dataset"], tester.args.roi, 'seg_assemble')
-                                            )
+    # zrange = range(*tester.kwargs['assemble_params']['zrange'])
+    # xrange = range(*tester.kwargs['assemble_params']['xrange'])
+    # yrange = range(*tester.kwargs['assemble_params']['yrange'])
+    #
+    # tester.show_or_save_assemble_microscopy(zrange=zrange, xrange=xrange, yrange=yrange,
+    #                                         source=os.path.join(tester.config['DESTINATION'], tester.kwargs["dataset"], tester.args.roi, 'xy/'),
+    #                                         # output_path="tmp_xy.tif",
+    #                                         output_path=os.path.join(tester.config['DESTINATION'], tester.kwargs["dataset"], tester.args.roi, 'xy_assemble')#
+    #                                         )
+    #
+    # tester.show_or_save_assemble_microscopy(zrange=zrange, xrange=xrange, yrange=yrange,
+    #                                         source=os.path.join(tester.config['DESTINATION'], tester.kwargs["dataset"], tester.args.roi, 'ori/'),
+    #                                         # output_path="tmp_ori.tif",
+    #                                         output_path=os.path.join(tester.config['DESTINATION'], tester.kwargs["dataset"], tester.args.roi, 'ori_assemble')
+    #                                         )
+    #
+    # tester.show_or_save_assemble_microscopy(zrange=zrange, xrange=xrange, yrange=yrange,
+    #                                         source=os.path.join(tester.config['DESTINATION'], tester.kwargs["dataset"], tester.args.roi, 'seg/'),
+    #                                         output_path=os.path.join(tester.config['DESTINATION'], tester.kwargs["dataset"], tester.args.roi, 'seg_assemble')
+    #                                         )
     # t5 = time.time()
     # print("img3 : ", t5-t4)
 
@@ -991,3 +1133,5 @@ if __name__ == "__main__":
     # CUDA_VISIBLE_DEVICES=3 python test_combine_o.py --prj /1dpm/ --epoch 1100 --model_type AE --gpu --hbranchz --assemble --assemble_method tiff --config config_122924 --save ori seg xy
     # python test_combine_o.py  --prj /ae/cut/1/ --epoch 800 --model_type AE --gpu --hbranchz --reverselog --save ori seg xy
     # python test_combine_o.py  --prj /1dpm/ --epoch 800 --model_type AE --gpu --hbranchz --reverselog --save ori seg xy --config config_122924
+
+    # python test_combine_o.py  --prj /ae/cut/1/ --epoch 800 --model_type AE --gpu --hbranchz --reverselog --save ori seg xy --augmentation decode

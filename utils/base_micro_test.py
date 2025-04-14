@@ -142,6 +142,7 @@ class InferenceBase:
             if self.kwargs.get("image_path"):
                 image_paths = [self.kwargs.get("root_path") + x for x in
                               self.kwargs.get("image_path", [])]
+
                 for i, path in enumerate(image_paths):
                     img = tiff.imread(path)
                     if norm:
@@ -166,7 +167,6 @@ class InferenceBase:
                 x0 = np.load(os.path.join(hbranch_path, "latent_hbranch.npy")).astype(np.float32)
             else:
                 raise ValueError("未提供有效的資料路徑 (hbranch_path)")
-
         return x0
 
     def save_images(self, outpath, img, axis=None, norm_method=None, exp_trd=None, trd=None):

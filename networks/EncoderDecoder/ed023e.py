@@ -193,9 +193,8 @@ class Generator(nn.Module):
                 return feat
             #print(x.shape)
             x = x.permute(1, 2, 3, 0).unsqueeze(0)  # (1, C, X, Y, Z)
-            #print(x.shape)
+
         x = self.decoder(x)
-        #print(x.shape)
         x70 = self.conv7_k(x)
         x71 = self.conv7_g(x)
         #print(x70.shape)

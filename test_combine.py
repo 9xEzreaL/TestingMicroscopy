@@ -55,10 +55,12 @@ def get_gan_out(args, x0, model):
 
 
 def get_ae_out(args, x0, model):
+    t1 = time.time()
     hbranchz = args.hbranchz
     gpu = args.gpu
     if gpu:
         x0 = x0.cuda()
+    print("x0 ", x0.shape, x0.max(), x0.min(), x0.mean())
     hb_all = []
     for z in range(0, 32, 4):
         with torch.cuda.amp.autocast(enabled=args.fp16):
@@ -67,7 +69,9 @@ def get_ae_out(args, x0, model):
             hb_all.append(posterior.sample())
         else:
             hb_all.append(hbranch)
-    hbranch = torch.cat(hb_all, dim=0).detach().cpu()
+
+    hbranch = torch.cat(hb_all, dim=0)#.detach().cpu()
+
     del hb_all
 
     if hbranchz:
@@ -76,12 +80,17 @@ def get_ae_out(args, x0, model):
     hbranch = hbranch.permute(1, 2, 3, 0).unsqueeze(0)
     if gpu:
         hbranch = hbranch.cuda()
+
+    print("hbranch ", hbranch.shape, hbranch.max(), hbranch.min(), hbranch.mean())
     XupX = model.net_g(hbranch, method='decode')['out0']  # (1, C, X, Y, Z)
 
     Xup = torch.nn.Upsample(size=(256, 256, 256), mode='trilinear')(x0.permute(1, 2, 3, 0).unsqueeze(0))  # (1, C, X, Y, Z)
+
     Xup = Xup[0, 0, ::].permute(2, 0, 1).detach().cpu()#.numpy()  # (Z, X, Y))
     XupX = XupX[0, 0, ::].permute(2, 0, 1).detach().cpu()#.numpy()
-
+    print(XupX.shape, XupX.max(), XupX.min(), XupX.mean())
+    t2 = time.time()
+    print("one time get_ae_out time: ", t2 - t1)
     return XupX, Xup
 
 
@@ -535,6 +544,7 @@ def test_entry_point():
     model, upsample = get_model(kwargs, args.prj, args.epoch, args.model_type, args.gpu, config['SOURCE'], fp16=args.fp16)
 
     # get data, then get normalization function
+    t1 = time.time()
     x0 = get_data(kwargs)
     for i in range(len(x0)):
         x0[i] = norm_x0(x0[i], kwargs['norm_method'][i],
@@ -544,7 +554,8 @@ def test_entry_point():
     out, patch = test_model(x0, model, upsample, input_augmentation=[None, 'transpose', 'flipX', 'flipY'][:],
                             model_type=args.model_type, args=args, **kwargs)
     out = out.mean(axis=3)
-
+    t2 = time.time()
+    print("total time not include save: ", t2-t1)
     # save single outputQ
     if args.reverselog:
         out = reverse_log(out)
@@ -594,6 +605,7 @@ if __name__ == '__main__':
     # DPM4X: (This is the main data)
     #   python test_combine.py  --prj /ae/iso0_ldmaex2_lb10_tc/ --epoch 2300 --model_type AE --gpu --reverselog --assemble
     #   python test_combine.py  --prj /ae/cut/1/ --epoch 800 --model_type AE --gpu --hbranchz --reverselog --assemble
+    # python test_combine.py  --prj /ae/cut/1/ --epoch 800 --model_type AE --gpu --hbranchz --reverselog
 
 
 
