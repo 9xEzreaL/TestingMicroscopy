@@ -286,7 +286,7 @@ if __name__ == "__main__":
                            trd=tester.kwargs['trd'][0])  # norm_method, exp_trd, trd # (Z, C, X, Y, N)
         tester.save_images("patch.tif", patch, (1, 2, 0, 3), norm_method=None,
                            trd=tester.kwargs['trd'][0])  # (Z, C, X, Y)
-        print("Single patch testing time : ", time.time() - tini)
+        # print("Single patch testing time : ", time.time() - tini)
 
     if tester.args.testcube:
         # recreate_volume_folder(

@@ -51,10 +51,6 @@ class ModelProcesser:
         self.model = model
         self.upsample_size = upsample_size
         self.gpu = args.gpu
-        # dummy method for fix upsample bug
-        # self.model.net_g.decoder[0][0][0] = Sequential2DUpsampling(scale_factor=(2, 2, 2))
-        # self.model.net_g.decoder[2][0][0] = Sequential2DUpsampling(scale_factor=(2, 2, 2))
-        # self.model.net_g.decoder[4][0][0] = Sequential2DUpsampling(scale_factor=(2, 2, 2))
 
     def get_model_result(self, x0, input_augmentation):
         if self.kwargs['model_type'] == 'AE':
@@ -70,13 +66,13 @@ class ModelProcesser:
             out_aug = []
             for mc in range(1): # if doing montel carlo for decoder augmentation
                 for i, aug in enumerate(method):  # (Z, C, X, Y)
-                    XupX = self.get_ae_decode(hbranch, aug)
+                    XupX, _ = self.get_ae_decode(hbranch, aug) # _ is seg
                     out_aug.append(XupX)
         else:
             out_aug = []
             for i, aug in enumerate(method):  # (Z, C, X, Y)
                 Xup, _, hbranch = self.get_ae_encode(x0, aug)
-                XupX = self.get_ae_decode(hbranch, aug)
+                XupX, _ = self.get_ae_decode(hbranch, aug) # _ is seg
                 out_aug.append(XupX)
 
         out_aug = torch.stack(out_aug, 0)
@@ -113,27 +109,20 @@ class ModelProcesser:
             hbranch = hbranch.cuda()
         if self.args.augmentation == "decode":
             hbranch = self._test_time_augementation(hbranch, method=method)
-            #print("do augmentation on decode for ", method)
         if self.kwargs['hbranchz']:
             hbranch = self.model.decoder.conv_in(hbranch)
         hbranch = hbranch.permute(1, 2, 3, 0).unsqueeze(0)  # (C, X, Y, Z)
-        # print("hbranch d : ", hbranch.shape)
 
         out = self.model.net_g(hbranch, method='decode')
-        Xout = out['out0'].detach()#.to('cpu')  # (1, C, X, Y, Z) # , non_blocking=True, non_blocking=True
-
-        #XupX = Xout[0, 0, ::].permute(2, 0, 1)  # .numpy()
-        #XupX = self._test_time_augementation(XupX.unsqueeze(1), method=method)
-        #XupX = XupX.squeeze()
-
-        #XupX_seg = Xout[0, 1, ::].permute(2, 0, 1)  # .numpy()
-        #XupX_seg = self._test_time_augementation(XupX_seg.unsqueeze(1), method=method)
-        #XupX_seg = XupX_seg.squeeze()
+        Xout = out['out0'].detach()#.to('cpu')  # (1, C, X, Y, Z)
+        Xout_seg = out['out1'].detach() # (1, C, X, Y, Z)
 
         # (1, C, X, Y, Z)
         XupX = Xout[0, :].permute(3, 0, 1, 2)  # (Z, C, X, Y)
+        Xout_seg = Xout_seg[0, :].permute(3, 0, 1, 2)  # (Z, C, X, Y)
         XupX = self._test_time_augementation(XupX, method=method)
-        return XupX
+        Xout_seg = self._test_time_augementation(Xout_seg, method=method)
+        return XupX, Xout_seg
 
     def _test_time_augementation(self, x, method):
         axis_mapping_func = {"Z": 0, "X": 2, "Y": 3}

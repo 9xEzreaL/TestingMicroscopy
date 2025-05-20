@@ -32,14 +32,10 @@ from torch.utils.data import DataLoader, Dataset
 
 class MicroTest(InferenceBase):
     def __init__(self):
-        # Init all args for data and model
-        self.init_params()
-
+        self.kwargs = None
         # Init model and upsample
         self.model, self.upsample = None, None
-        self.save_image_datatype = self.args.image_datatype # uint8 # float32 # uint16
-        self.normalization = DataNormalization(backward_type=self.save_image_datatype)
-
+        self.normalization = None
 
     def test_assemble(self, x0, mode="decode", input_augmentation=[None, 'transpose', 'flipX', 'flipY']):
         if mode == "decode":
@@ -92,7 +88,7 @@ class MicroTest(InferenceBase):
                     else:
                         w = fixed_w
                     with torch.cuda.amp.autocast():
-                        out_all = self.test_ae_decode(input, input_augmentation)
+                        out_all, _ = self.test_ae_decode(input, input_augmentation)
                     # out_all_mean = self.normalization.backward_normalization(out_all.mean(axis=3),
                     #                                                          self.kwargs["norm_method"][0],
                     #                                                          self.kwargs['exp_trd'][0],
@@ -145,21 +141,25 @@ class MicroTest(InferenceBase):
             hbranch_data = hbranch_data.cuda()
 
         aug_outs = []
+        aug_seg_outs = []
         for aug in input_augmentation:
             input_aug = hbranch_data * 1
 
             if self.args.fp16 and self.args.gpu:
                 input_aug = input_aug.half()
                 with torch.cuda.amp.autocast():
-                    out = self.model_processer.get_ae_decode(input_aug, aug)
+                    out, seg = self.model_processer.get_ae_decode(input_aug, aug)
             else:
-                out = self.model_processer.get_ae_decode(input_aug, aug)
+                out, seg = self.model_processer.get_ae_decode(input_aug, aug)
 
             aug_outs.append(out)
+            aug_seg_outs.append(seg)
 
         aug_outs = torch.stack(aug_outs, 0)
         out_mean = torch.mean(aug_outs, 0)
-        return out_mean
+        aug_seg_outs = torch.stack(aug_seg_outs, 0)
+        aug_seg_outs = torch.mean(aug_seg_outs, 0)
+        return out_mean, aug_seg_outs
 
     def show_or_save_assemble_microscopy(self, zrange, xrange, yrange, source, output_path="tmp.tif", show=True):
         """
@@ -253,6 +253,22 @@ class MicroTest(InferenceBase):
         y_start, y_end = yrange[0]+C[2], yrange[-1]+self.kwargs['upsample_params']['size'][2]-C[2]
         x_start, x_end = xrange[0]+C[1], xrange[-1]+self.kwargs['upsample_params']['size'][1]-C[1]
 
+        # store = zarr.DirectoryStore("/home/tzui/Dataset/results/chu123024/VMAT")
+        # root = zarr.group(store=store, overwrite=True)
+        # x0[0]
+        # volume = root.create_dataset(
+        #     'volume',
+        #     shape=(total_z, total_x, total_y),
+        #     dtype=self.save_image_datatype,
+        #     chunks=(256, 256, 256),  # 根據具體情況調整分塊大小
+        #     compressor=zarr.Blosc(cname='zstd', clevel=3, shuffle=2)
+        # )
+        # print(xrange)
+        # print(yrange)
+
+        tiff.imwrite("/home/tzui/Dataset/results/chu123024/VMAT/ORI/ori.tif", np.transpose(x0[0][0, 0, zrange[0]:zrange[-1]+self.kwargs['upsample_params']['size'][0], list(xrange)[0]:list(xrange)[-1]+self.kwargs['upsample_params']['size'][1], list(yrange)[0]:list(yrange)[-1]+self.kwargs['upsample_params']['size'][2]].numpy(), (1,0,2)).astype(np.float16))
+        assert 0
+
         for c in range(len(x0)):
             print('c', c)
             os.makedirs(os.path.join(self.kwargs['DESTINATION'], self.kwargs['dataset'], 'ori_' + str(c) + '/'), exist_ok=True)
@@ -263,9 +279,13 @@ class MicroTest(InferenceBase):
 
                 tiff.imwrite(os.path.join(self.kwargs['DESTINATION'], self.kwargs['dataset'], 'ori_' + str(c) + '/',
                             f'slice_{x}.tif'), (slice.numpy() * 255).astype(np.uint8))
+                # tiff.imwrite(os.path.join(self.kwargs['DESTINATION'], self.kwargs['dataset'], 'ori_' + str(c) + '/',
+                #                           f'slice_{x}.tif'), (slice.numpy()).astype(np.float16))
 
 if __name__ == "__main__":
     tester = MicroTest()
+    tester.init_params()
+    tester.normalization = DataNormalization(backward_type=tester.save_image_datatype)
     tester.update_model()
 
     zrange = tester.kwargs['assemble_params']['zrange']
@@ -276,7 +296,7 @@ if __name__ == "__main__":
     xrange = range(*[eval(str(x)) for x in xrange])
     yrange = range(*[eval(str(x)) for x in yrange])
 
-    if 1:
+    if 0:
         x0 = tester.get_data()
         tester.test_assemble(x0, mode="decode", input_augmentation=[None, 'transpose', 'flipX', 'flipY'][:2])
 

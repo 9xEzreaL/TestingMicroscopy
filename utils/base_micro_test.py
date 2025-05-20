@@ -45,19 +45,19 @@ def create_tapered_weight(S0, S1, S2, nz, nx, ny, size, edge_size=64) -> np.ndar
     taper_S2 = np.linspace(0, 1, S2)
 
     # Z 軸 taper
-    if nz != 0:
+    if nz != 0 and nz != -2:
         weight[:S0, :, :] *= taper_S0.reshape(-1, 1, 1)
-    if nz != -1:
+    if nz != -1 and nz != -2:
         weight[-S0:, :, :] *= taper_S0[::-1].reshape(-1, 1, 1)
     # X 軸 taper
-    if nx != 0:
+    if nx != 0 and nx != -2:
         weight[:, :S1, :] *= taper_S1.reshape(1, -1, 1)
-    if nx != -1:
+    if nx != -1 and nx != -2:
         weight[:, -S1:, :] *= taper_S1[::-1].reshape(1, -1, 1)
     # Y 軸 taper
-    if ny != 0:
+    if ny != 0 and ny != -2:
         weight[:, :, :S2] *= taper_S2
-    if ny != -1:
+    if ny != -1 and ny != -2:
         weight[:, :, -S2:] *= taper_S2[::-1]
 
     return weight
@@ -87,6 +87,7 @@ class InferenceBase:
 
     def init_params(self):
         self.args = self.update_args()
+        self.save_image_datatype = self.args.image_datatype  # uint8 # float32 # uint16
         # 假設 YAML 檔放在 test/ 目錄下，檔名為 {config}.yaml
         config_path = os.path.join('test', self.args.config + '.yaml')
         with open(config_path, 'r') as f:
@@ -103,6 +104,7 @@ class InferenceBase:
         """
         根據 kwargs 中的 model_type 載入模型與建立 upsample 模組
         """
+        print(self.kwargs)
         if self.kwargs['model_type'] == 'GAN':
             model_name = os.path.join(self.kwargs['SOURCE'], 'logs', self.kwargs['prj'],
                                       'checkpoints', f"net_g_model_epoch_{self.kwargs['epoch']}.pth")
@@ -142,7 +144,6 @@ class InferenceBase:
             if self.kwargs.get("image_path"):
                 image_paths = [self.kwargs.get("root_path") + x for x in
                               self.kwargs.get("image_path", [])]
-
                 for i, path in enumerate(image_paths):
                     img = tiff.imread(path)
                     if norm:
