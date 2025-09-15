@@ -81,34 +81,34 @@ def _CHECK_PARAMS(kwargs, data=None):
         if assemble_params.get('weight_method') != 'cross':
             raise ValueError("Error: 'weight_method' in 'assemble_params' must be 'cross'.")
 
-        if data:
-            # If have data, check size again.
-            data_z, data_x, data_y = data[0][0, 0, ::].shape
-            # print(assemble_params["zrange"][1])
-            # print(kwargs["upsample_params"]["size"][1])
-            if assemble_params["zrange"][1] + kwargs["upsample_params"]["size"][0] > data_z +1:
-                assemble_params["zrange"][1] = data_z - kwargs["upsample_params"]["size"][0]  +1
-                print(f"over range set z axis to {assemble_params['zrange'][1]}")
-            if assemble_params["xrange"][1] + kwargs["upsample_params"]["size"][1] > data_x +1:
-                assemble_params["xrange"][1] = data_x - kwargs["upsample_params"]["size"][1]  +1
-                print(f"over range set x axis to {assemble_params['xrange'][1]}")
-            if assemble_params["yrange"][1] + kwargs["upsample_params"]["size"][2] > data_y +1:
-                assemble_params["yrange"][1] = data_y - kwargs["upsample_params"]["size"][2]  +1
-                print(f"over range set y axis to {assemble_params['yrange'][1]}")
-
-
-        # Auto fill params
-        assemble_params["weight_shape"] = [
-            (x * kwargs['N_resolution'] - 2 * y) if i == 0 else (x - 2 * y)
-            for i, (x, y) in enumerate(zip(assemble_params['dx_shape'], assemble_params['C']))
-        ]
-        computed_z = assemble_params['dx_shape'][0] - int((assemble_params['C'][0] * 2 + assemble_params['S'][0])/kwargs['N_resolution'])
-        computed_x = assemble_params['dx_shape'][1] - assemble_params['C'][1] * 2 - assemble_params['S'][1]
-        computed_y = assemble_params['dx_shape'][2] - assemble_params['C'][2] * 2 - assemble_params['S'][2]
-
-        assemble_params['zrange'] = assemble_params['zrange'][:2] + [computed_z]
-        assemble_params['xrange'] = assemble_params['xrange'][:2] + [computed_x]
-        assemble_params['yrange'] = assemble_params['yrange'][:2] + [computed_y]
+        # if data:
+        #     # If have data, check size again.
+        #     data_z, data_x, data_y = data[0][0, 0, ::].shape
+        #     # print(assemble_params["zrange"][1])
+        #     # print(kwargs["upsample_params"]["size"][1])
+        #     if assemble_params["zrange"][1] + kwargs["upsample_params"]["size"][0] > data_z +1:
+        #         assemble_params["zrange"][1] = data_z - kwargs["upsample_params"]["size"][0]  +1
+        #         print(f"over range set z axis to {assemble_params['zrange'][1]}")
+        #     if assemble_params["xrange"][1] + kwargs["upsample_params"]["size"][1] > data_x +1:
+        #         assemble_params["xrange"][1] = data_x - kwargs["upsample_params"]["size"][1]  +1
+        #         print(f"over range set x axis to {assemble_params['xrange'][1]}")
+        #     if assemble_params["yrange"][1] + kwargs["upsample_params"]["size"][2] > data_y +1:
+        #         assemble_params["yrange"][1] = data_y - kwargs["upsample_params"]["size"][2]  +1
+        #         print(f"over range set y axis to {assemble_params['yrange'][1]}")
+        #
+        #
+        # # Auto fill params
+        # assemble_params["weight_shape"] = [
+        #     (x * kwargs['N_resolution'] - 2 * y) if i == 0 else (x - 2 * y)
+        #     for i, (x, y) in enumerate(zip(assemble_params['dx_shape'], assemble_params['C']))
+        # ]
+        # computed_z = assemble_params['dx_shape'][0] - int((assemble_params['C'][0] * 2 + assemble_params['S'][0])/kwargs['N_resolution'])
+        # computed_x = assemble_params['dx_shape'][1] - assemble_params['C'][1] * 2 - assemble_params['S'][1]
+        # computed_y = assemble_params['dx_shape'][2] - assemble_params['C'][2] * 2 - assemble_params['S'][2]
+        #
+        # assemble_params['zrange'] = assemble_params['zrange'][:2] + [computed_z]
+        # assemble_params['xrange'] = assemble_params['xrange'][:2] + [computed_x]
+        # assemble_params['yrange'] = assemble_params['yrange'][:2] + [computed_y]
         
         print(kwargs)
 
@@ -142,9 +142,6 @@ class DataNormalization:
 
     def forward_normalization(self, x0, norm_method, trd):
         if norm_method == 'exp':
-            """
-            this is a dummy method
-            """
             exp_ftr = 7
             x0[x0 <= trd[0]] = trd[0]
             x0[x0 >= trd[1]] = trd[1]
@@ -157,16 +154,12 @@ class DataNormalization:
         elif norm_method == '11':
             x0[x0 <= trd[0]] = trd[0]
             x0[x0 >= trd[1]] = trd[1]
-            # x0 = x0 / x0.max()
             x0 = (x0 - x0.min()) / (x0.max() - x0.min())
             x0 = (x0 - 0.5) * 2
             x0 = torch.from_numpy(x0).unsqueeze(0).unsqueeze(0).float()
         elif norm_method == '00':
             x0 = torch.from_numpy(x0).unsqueeze(0).unsqueeze(0).float()
         elif norm_method == '01':
-            print(trd[1])
-            x0[x0 >= trd[1]] = trd[1]
-            # x0 = x0 / x0.max()
             x0 = (x0 - x0.min()) / (x0.max() - x0.min())
             x0 = torch.from_numpy(x0).unsqueeze(0).unsqueeze(0).float()
         return x0
@@ -189,9 +182,9 @@ class DataNormalization:
             x0[x0 <= -1] = -1
             x0[x0 >= 1] = 1
             x0 = (x0 + 1) / 2
-            # x0 = (x0 - x0.min()) / (x0.max() - x0.min() + 1e-7)
             return x0
         elif norm_method == '00':
+            Warning(f"norm method {norm_method} may potentially caused pixel value issue, if any problem see data_utils.py")
             return x0
         elif norm_method == '01':
             x0[x0 <= 0] = 0
@@ -200,9 +193,9 @@ class DataNormalization:
 
     def to_8bit(self, x0):
         if type(x0) == torch.Tensor:
-            x0 = (x0 / x0.max() * 255).numpy().astype(np.uint8)
+            x0 = (x0 * 255).numpy().astype(np.uint8)
         else:
-            x0 = (x0 / x0.max() * 255).astype(np.uint8)
+            x0 = (x0 * 255).astype(np.uint8)
         return x0
 
     def to_16bit(self, x0, lower_bound=0, upper_bound=550):

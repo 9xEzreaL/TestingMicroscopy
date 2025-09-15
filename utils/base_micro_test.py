@@ -2,6 +2,7 @@ import argparse
 import os
 import shutil
 import yaml
+import zarr
 import numpy as np
 import torch
 import tifffile as tiff
@@ -9,6 +10,20 @@ import warnings
 
 from utils.data_utils import DataNormalization, _CHECK_PARAMS
 from utils.model_utils import read_json_to_args, import_model, load_pth, ModelProcesser
+
+def read_image(path):
+    """
+    read tiff or zarr by folder/ data naming
+    """
+    if path.endswith(('.tif', '.tiff')):
+        return tiff.imread(path)
+    elif path.endswith(('.npy')):
+        return np.load(path).astype(np.float32)
+    elif '.zarr' in path and os.path.isdir(path):
+        z = zarr.open(path, mode='r', use_zarr_fill_value_as_mask=True)
+        return z
+    else:
+        raise ValueError(f"不支援的影像格式: {path}")
 
 
 def reverse_log(x):
@@ -62,6 +77,30 @@ def create_tapered_weight(S0, S1, S2, nz, nx, ny, size, edge_size=64) -> np.ndar
 
     return weight
 
+def create_tapered_weight_torch(S0, S1, S2, nz, nx, ny, size, device):
+    weight = torch.ones(size, device=device)
+    taper_S0 = torch.linspace(0, 1, S0, device=device)
+    taper_S1 = torch.linspace(0, 1, S1, device=device)
+    taper_S2 = torch.linspace(0, 1, S2, device=device)
+
+    # Z 軸 taper
+    if nz != 0 and nz != -2:
+        weight[:S0, :, :] *= taper_S0.view(-1, 1, 1)
+    if nz != -1 and nz != -2:
+        weight[-S0:, :, :] *= taper_S0.flip(0).view(-1, 1, 1)
+    # X 軸 taper
+    if nx != 0 and nx != -2:
+        weight[:, :S1, :] *= taper_S1.view(1, -1, 1)
+    if nx != -1 and nx != -2:
+        weight[:, -S1:, :] *= taper_S1.flip(0).view(1, -1, 1)
+    # Y 軸 taper
+    if ny != 0 and ny != -2:
+        weight[:, :, :S2] *= taper_S2
+    if ny != -1 and ny != -2:
+        weight[:, :, -S2:] *= taper_S2.flip(0)
+
+    return weight
+
 
 class InferenceBase:
     def update_args(self):
@@ -74,21 +113,18 @@ class InferenceBase:
         parser.add_argument('--gpu', action='store_true', default=False)
         parser.add_argument('--fp16', action='store_true', default=False, help='Enable FP16 inference')
         parser.add_argument('--save', nargs='+', choices=['ori', 'recon', 'xy'], required=False, help="assign image to save: --save ori recon")
-        parser.add_argument('--image_datatype', type=str, default="float32")
+        parser.add_argument('--image_datatype', type=str, default="float32", choices=['float32', 'uint16', 'uint8'])
         parser.add_argument('--augmentation', type=str, default="encode")
         parser.add_argument('--reslice', action='store_true', default=False)
-        parser.add_argument('--host', type=str, default='dummy')
-        parser.add_argument('--port', type=str, default='dummy')
         parser.add_argument('--assemble_method', type=str, default='tiff',
                             help='tiff or zarr method while assemble images')
-        parser.add_argument('--roi', type=str, default='')
         parser.add_argument('--targets', nargs='+', default=None, required=False, help="assign target to assemble")
         return parser.parse_args()
 
     def init_params(self):
         self.args = self.update_args()
         self.save_image_datatype = self.args.image_datatype  # uint8 # float32 # uint16
-        # 假設 YAML 檔放在 test/ 目錄下，檔名為 {config}.yaml
+        # yaml path
         config_path = os.path.join('test', self.args.config + '.yaml')
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
@@ -96,35 +132,33 @@ class InferenceBase:
 
     def process_config(self, config, option):
         """
-        合併設定檔中的 DEFAULT 與指定 option 的設定
+        combine args option and default
         """
         return _CHECK_PARAMS({**config['DEFAULT'], **config[option]})
 
     def update_model(self):
-        """
-        根據 kwargs 中的 model_type 載入模型與建立 upsample 模組
-        """
-        print(self.kwargs)
         if self.kwargs['model_type'] == 'GAN':
             model_name = os.path.join(self.kwargs['SOURCE'], 'logs', self.kwargs['prj'],
                                       'checkpoints', f"net_g_model_epoch_{self.kwargs['epoch']}.pth")
             print("Loading GAN model from:", model_name)
             self.model = torch.load(model_name, map_location=torch.device('cpu'))
-        elif self.kwargs['model_type'] == 'AE':
+        elif self.kwargs['model_type'] in ['AE', 'VQQAE']:
             component_names = ['encoder', 'decoder', 'net_g', 'post_quant_conv', 'quant_conv']
+            if self.kwargs['model_type'] == 'VQQAE':
+                component_names.append('quantize')
             root = os.path.join(self.kwargs['SOURCE'], 'logs', self.kwargs['prj'])
             args_json = read_json_to_args(os.path.join(root, '0.json'))
             model_module = import_model(root, model_name=args_json.models)
             self.model = model_module.GAN(args_json, train_loader=None, eval_loader=None, checkpoints=None)
             self.model = load_pth(self.model, root=root, epoch=self.kwargs['epoch'], model_names=component_names)
 
-        if self.kwargs['model_type'] in ['AE', 'GAN', 'Upsample']:
+        if self.kwargs['model_type'] in ['AE', 'GAN', 'Upsample', 'VQQAE']:
             self.upsample = torch.nn.Upsample(size=self.kwargs['upsample_params']['size'], mode='trilinear')
             if self.args.gpu:
                 self.model = self.model.cuda()
                 self.upsample = self.upsample.cuda()
 
-        if self.kwargs['model_type'] in ['AE', 'GAN']:
+        if self.kwargs['model_type'] in ['AE', 'GAN', 'VQQAE']:
             for param in self.model.parameters():
                 param.requires_grad = False
             if self.args.fp16:
@@ -133,11 +167,11 @@ class InferenceBase:
         self.model_processer = ModelProcesser(self.args, self.kwargs,
                                               self.model, self.kwargs['upsample_params']['size'])
 
-    def get_data(self, norm=True, get_ori=False):
+    def register_data(self, get_ori=False):
         """
-        讀取資料：
-         - 若 get_ori 為 True，則讀取原始影像（從 image_path 或 image_list_path）
-         - 否則讀取 hbranch 潛在資料（需指定 hbranch_path）
+
+        :param get_ori: ori image array if True, latent array if False
+        :return: tiff and 2D zarr -> array / 3D zarr -> proxy
         """
         x0 = []
         if get_ori:
@@ -145,36 +179,45 @@ class InferenceBase:
                 image_paths = [self.kwargs.get("root_path") + x for x in
                               self.kwargs.get("image_path", [])]
                 for i, path in enumerate(image_paths):
-                    img = tiff.imread(path)
-                    if norm:
-                        img = self.normalization.forward_normalization(
-                            img, self.kwargs["norm_method"][i], self.kwargs['trd'][i])
+                    img = read_image(path)
                     x0.append(img)
-            elif self.kwargs.get("image_list_path"):
+            elif self.kwargs.get("image_list_path"): # 2D zarr not suggested
                 image_list_path = [os.path.join(self.kwargs.get("root_path"), x)
                                    for x in self.kwargs.get("image_list_path")]
                 for num, folder in enumerate(image_list_path):
-                    ids = sorted(os.listdir(folder))
-                    img = np.stack([tiff.imread(os.path.join(folder, id)) for id in ids], axis=0)
-                    if norm:
-                        img = self.normalization.forward_normalization(
-                            img, self.kwargs["norm_method"][num], self.kwargs['trd'][num])
+                    ids = [d for d in sorted(os.listdir(folder)) if os.path.isdir(os.path.join(folder, d)) and not d.startswith(".")]
+                    img = np.stack([read_image(os.path.join(folder, id)) for id in ids], axis=0)
                     x0.append(img)
-            # update again
-            self.kwargs = _CHECK_PARAMS(self.kwargs, x0)
+            return x0
         else:
             hbranch_path = self.kwargs.get("hbranch_path")
             if hbranch_path:
-                x0 = np.load(os.path.join(hbranch_path, "latent_hbranch.npy")).astype(np.float32)
+                if not ".zarr" in hbranch_path:
+                    hbranch_path = os.path.join(hbranch_path, "latent_hbranch.npy")
+                return read_image(hbranch_path).astype(np.float32)
             else:
-                raise ValueError("未提供有效的資料路徑 (hbranch_path)")
-        return x0
+                raise ValueError("not valid data path for hbranch_path")
+
+
+    def slicing_data(self, x0, norm=True, crd_x=None, crd_y=None, crd_z=None):
+        if isinstance(x0, list):
+            slice_x0 = []
+            for idx, img in enumerate(x0):
+                img = img[crd_z[0]: crd_z[1], crd_x[0]: crd_x[1], crd_y[0]: crd_y[1]]
+                if norm:
+                    img = self.normalization.forward_normalization(
+                        img, self.kwargs["norm_method"][idx], self.kwargs['trd'][idx])
+
+                slice_x0.append(img)
+            return slice_x0
+        else:
+            img = x0[:, :, :, :, crd_z, crd_x, crd_y]
+            # img = x0[:, :, :, :, crd_z:crd_z+1, crd_x:crd_x+1, crd_y:crd_y+1]
+            return img
+
 
     def save_images(self, outpath, img, axis=None, norm_method=None, exp_trd=None, trd=None):
-        """
-        儲存影像：
-          - 可做 normalization 與轉置 (axis)
-        """
+        # save_image_method
         directory = os.path.dirname(outpath)
         if directory:
             os.makedirs(directory, exist_ok=True)
@@ -197,7 +240,7 @@ class InferenceBase:
             return x
 
     def _do_upsample(self, x):
-        assert self.upsample is not None, "upsample 尚未初始化，請先呼叫 update_model()"
+        assert self.upsample is not None, "upsample not initialized，call update_model()"
         return self.upsample(x)
 
 

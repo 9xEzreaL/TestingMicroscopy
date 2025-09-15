@@ -1,8 +1,9 @@
 DEFAULT:
-  SOURCE: '/home/ubuntu/Data/TestingMicroscopy'
-  root_path: '/home/ubuntu/Data/TestingMicroscopy/DPM4X/'
+  SOURCE: '/home/ubuntu/Data/TestingMicroscopy' # with logs
+  root_path: '/home/ubuntu/Data/TestingMicroscopy/DPM4X/' # with image path
   DESTINATION: '/home/tzui/Project/TestingMicroscopy/Dataset/paired_images/'
   N_resolution: 8 # 8x super-resolution
+  N_GPUS: 2 # num of gpus in decode
   upsample_params: # upsample size, same with dx if no upsample
     size: [32, 256, 256]
   patch_range: # coordinates (Z, X, Y) of ROI before upsampling
@@ -14,7 +15,7 @@ DEFAULT:
     dx_shape: [ 32, 256, 256 ] # (dz, dx, dy) inference size # upsample size (60, 128, 384) > (384, 128, 384)
 #    weight_shape: [ 192, 192, 192 ] # shape of the weight = dx_shape - cropping
     weight_method: "cross"
-    zrange: [ 0, 200] # (z0, x0, y0), (z0 + dz, x0 + dx, y0 + dy), coordinates after upsampling
+    zrange: [ 0, 449] # (z0, x0, y0), (z0 + dz, x0 + dx, y0 + dy), coordinates after upsampling
     xrange: [ 0, 769]
     yrange: [ 0, 769]
   norm_method: [ "exp", "11" ]  # normalization method for each data in the list
@@ -22,11 +23,11 @@ DEFAULT:
 
 VMAT:
   dataset: "DPM4X"
-  prj: "DPM4X/ae/cut/1/"
+  prj: "DPM4X/ae/cut/1/" # SOURCE + prj = model location
   epoch: 800
   model_type: AE
   hbranchz: true
-  image_path: ["/ori/3-2ROI000.tif","/ft0/3-2ROI000.tif"]
+  image_path: ["/ori/3-2ROI000.tif","/ft0/3-2ROI000.tif"] # root_path + prj = model location
 #  image_list_path: null # ["ori", "ft0"]
   hbranch_path: "/home/tzui/Project/TestingMicroscopy/Dataset/paired_images/DPM4X/hbranch"
 DPM:

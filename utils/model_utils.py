@@ -83,34 +83,24 @@ class ModelProcesser:
     def get_ae_encode(self, x0, method=None):
         if self.gpu:
             x0 = x0.cuda(non_blocking=True)
-            # x0 = x0.to('cuda:0', non_blocking=True)
         if self.args.augmentation == "encode":
             x0 = self._test_time_augementation(x0, method=method)
 
-        hb_all = []
         with torch.inference_mode():
-            for z in range(0, x0.shape[0], 4):
-                with torch.cuda.amp.autocast(enabled=self.args.fp16):
-                    _, posterior, hbranch = self.model.forward(x0[z:z + 4, :, :, :], sample_posterior=False)
+            with torch.cuda.amp.autocast(enabled=self.args.fp16):
+                posterior, hbranch, _, = self.model.encode(x0)
                 if self.kwargs['hbranchz']:
-                    hb_all.append(posterior.sample())
-                else:
-                    hb_all.append(hbranch)
-        hbranch = torch.cat(hb_all, dim=0)
+                    hbranch = posterior.sample()
 
-        Xup = torch.nn.Upsample(size=(self.upsample_size[0]*8, self.upsample_size[1], self.upsample_size[2]), mode='trilinear')(
-            x0.permute(1, 2, 3, 0).unsqueeze(0))  # (1, C, X, Y, Z)
-        Xup = Xup[0, :, ::].permute(3, 0, 1, 2).detach().to('cpu')  # .numpy()  # (Z, C, X, Y))
-        del hb_all
-        return Xup, _, hbranch.detach().cpu()
+        # Xup = torch.nn.Upsample(size=(self.upsample_size[0]*8, self.upsample_size[1], self.upsample_size[2]), mode='trilinear')(
+        #     x0.permute(1, 2, 3, 0).unsqueeze(0))  # (1, C, X, Y, Z)
+        # Xup = Xup[0, :, ::].permute(3, 0, 1, 2).detach().to('cpu')  # .numpy()  # (Z, C, X, Y))
+        return _, _, hbranch.detach().cpu() # Xup, _, hbranch.detach().cpu()
 
     def get_ae_decode(self, hbranch, method):
-        if self.gpu:
-            hbranch = hbranch.cuda()
         if self.args.augmentation == "decode":
             hbranch = self._test_time_augementation(hbranch, method=method)
-        if self.kwargs['hbranchz']:
-            hbranch = self.model.decoder.conv_in(hbranch)
+        hbranch = self.model.decoder.conv_in(hbranch)
         hbranch = hbranch.permute(1, 2, 3, 0).unsqueeze(0)  # (C, X, Y, Z)
 
         out = self.model.net_g(hbranch, method='decode')
