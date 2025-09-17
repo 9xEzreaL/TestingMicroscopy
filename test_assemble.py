@@ -388,10 +388,13 @@ if __name__ == "__main__":
     xrange = range(*[eval(str(x)) for x in xrange])
     yrange = range(*[eval(str(x)) for x in yrange])
 
-    if 0:
+    if tester.args.testcube:
+        # enhance method
         x0 = tester.register_data() # (32, 4, 32, 32, 5, 4, 4)
-        tester.test_assemble(x0, mode="decode", input_augmentation=[None, 'transpose', 'flipX', 'flipY'][:], saved="zarr")
-    if 1:
+        tester.test_assemble(x0, mode="decode", input_augmentation=[None, 'transpose', 'flipX', 'flipY'][:],
+                             saved=tester.args.assemble_method)
+    if tester.args.reslice:
+        # get corresponding original image
         tester.reslice_ori()
 
 

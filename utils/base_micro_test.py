@@ -116,7 +116,7 @@ class InferenceBase:
         parser.add_argument('--image_datatype', type=str, default="float32", choices=['float32', 'uint16', 'uint8'])
         parser.add_argument('--augmentation', type=str, default="encode")
         parser.add_argument('--reslice', action='store_true', default=False)
-        parser.add_argument('--assemble_method', type=str, default='tiff',
+        parser.add_argument('--assemble_method', type=str, default='tiff', choices=['tiff', 'zarr', 'none'],
                             help='tiff or zarr method while assemble images')
         parser.add_argument('--targets', nargs='+', default=None, required=False, help="assign target to assemble")
         return parser.parse_args()

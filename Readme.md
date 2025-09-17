@@ -74,13 +74,12 @@ assemble_params:
 For encoding operations that convert input images to latent representations:
 
 ```bash
-python test_only.py --gpu --config config_name --save ori recon xy --augmentation decode --fp16 --option DPM --testcube
+python test_only.py --gpu --config config_name --augmentation decode --fp16 --option DPM --testcube
 ```
 
 **Key Parameters:**
 - `--gpu`: Enable GPU acceleration
 - `--config`: Configuration file name (without .yaml extension)
-- `--save`: Output types (ori, recon, xy, seg)
 - `--augmentation`: Augmentation strategy (decode recommended for speed)
 - `--fp16`: Use half-precision for faster inference
 - `--option`: Model variant (DPM or VMAT)
@@ -91,16 +90,18 @@ python test_only.py --gpu --config config_name --save ori recon xy --augmentatio
 For decoding operations that reconstruct images from latent representations:
 
 ```bash
-python test_assemble.py --gpu --config config_name --augmentation decode --fp16 --option DPM --reslice
+python test_assemble.py --gpu --config config_name --augmentation decode --fp16 --option DPM --reslice --testcube
 ```
 
 **Key Parameters:**
+- `--testcube`: Run decode or not
 - `--gpu`: Enable GPU acceleration
 - `--config`: Configuration file name
 - `--augmentation`: Augmentation strategy
 - `--fp16`: Use half-precision
+- `--assemble_method`: save as tiff zarr or none
 - `--option`: Model variant
-- `--reslice`: Reslice original images
+- `--reslice`: Reslice original images or not
 
 ## Supported Data Formats
 
