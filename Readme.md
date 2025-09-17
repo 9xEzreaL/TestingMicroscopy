@@ -1,92 +1,228 @@
-# Inference code for flybrain image enhancement
+# Microscopy Image Enhancement Inference
 
-## Easy startup
-    pip install requirements.txt
+This repository contains inference code for microscopy image enhancement using deep learning models. The system supports both encoding and decoding operations with multi-GPU acceleration and various data formats.
 
-## Experiment
-<div align="center">
+## Features
 
-| **Experiment** | **augmentation** | **inference datatype** | **saved datatype** | **cost time per 32x256x256 patch** |                  **enhanced img**                  |                    **enhanced seg**                    |
-|:--------------:|:----------------:|:----------------------:|:------------------:|:----------------------------------:|:--------------------------------------------------:|:------------------------------------------------------:|
-|       A        |  encode+decode   |          fp32          |        fp32        |              4.084 s               | <img width="80%" src="sample/enc_fp32_save32.png"> | <img width="80%" src="sample/seg_enc_fp32_save32.png"> |
-|       B        |      decode      |          fp32          |        fp32        |               3.18 s               | <img width="80%" src="sample/dec_fp32_save32.png"> | <img width="80%" src="sample/seg_dec_fp32_save32.png"> |
-|       C        |  encode+decode   |          fp16          |        fp32        |              3.146 s               | <img width="80%" src="sample/enc_fp16_save32.png"> | <img width="80%" src="sample/seg_enc_fp16_save32.png"> |
-|       D        |      decode      |          fp16          |        fp32        |               2.43 s               |                                                    |                                                        |
-|       E        |  encode+decode  |          fp32          |       uint16       |              4.084 s               | <img width="80%" src="sample/enc_fp32_save16.png"> | <img width="80%" src="sample/seg_enc_fp32_save16.png"> |
-|       F        |  encode+decode  |          fp32          |       uint8        |              4.084 s               | <img width="80%" src="sample/enc_fp32_save8.png">  | <img width="80%" src="sample/seg_enc_fp32_save8.png">  |
-</div>
+- **Multi-GPU Support**: Efficient parallel processing across multiple GPUs
+- **Flexible Input Formats**: Support for 2D/3D TIFF and 2D/3D Zarr formats
+- **Large Data Handling**: 3D Zarr format supports scaling up to 100GB+ datasets
+- **Multiple Output Formats**: Save results as TIFF, Zarr, or skip saving
+- **Data Type Options**: Output in float32, uint16, or uint8
+- **Configuration-Driven**: All settings managed through YAML configuration files
 
+## Installation
 
-## Pipeline 
-<details>
-<summary><code><b> click here </b></code></summary>
+```bash
+pip install -r requirements.txt
+```
 
-    -  Initial tester object    
-        tester = MicroTest()
-    -  Register data
-        x0 = tester.get_data()
-    -  Register model
-        tester.update_model()
-    -  Testing
-        1. Test single image
-        2. Tesing multiple patch
-        3. Assemble patch to large image
+## Project Structure
 
-</details>
+```
+├── test_only.py          # Encoding inference code
+├── test_assemble.py      # Decoding inference code  
+├── test/                 # Configuration files
+│   ├── config.yaml       # Main configuration
+│   ├── config_example.yaml
+│   └── ...
+├── utils/                # Utility modules
+├── networks/             # Model architectures
+├── models/               # Model definitions
+└── sample/               # Example outputs
+```
 
-## Arguments flag
-<details>
-<summary><code><b> click here </b></code></summary>
+## Configuration
 
-    --fp16: use float point 16 inference model 
-    --assemble_method: compose image method, can use tiff or zarr
-    --save: which images you want to save, ex: ori seg, can use ori seg recon xy
-    --image_datatype: saved image datatype, support float32, uint16, uint8
-    --augmentation: do augmentation while encode or decode, will be more faster if do --augmentation decode
-    --roi: assigned subfolder naming, ex: roiA
-</details>
+The system uses YAML configuration files located in the `test/` directory. Key configuration sections:
 
-## Support data types
-<details>
-<summary><code><b> click here </b></code></summary>
+### Basic Settings
+```yaml
+SOURCE: '/path/to/model/logs'
+DESTINATION: '/path/to/output'
+N_resolution: 8  # Super-resolution factor
+N_GPUS: 2        # Number of GPUs for decoding
+```
 
-    - Support load data 2D/3D tif and numpy latent Z
-        - 2D folder : Use argument image_list_path in config yaml
-        - 3D staack : Use argument image_path in config yaml
-        - latent Z : Use argument hbranch_path in config yaml
-More details in function ****"get_data"****
-</details>
+### Model Configuration
+```yaml
+DPM:  # or VMAT
+  dataset: "DPM4X"
+  prj: "DPM4X/ae/cut/1/"
+  epoch: 800
+  model_type: AE
+  hbranchz: true
+  image_path: ["/ori/3-2ROI000.tif", "/ft0/3-2ROI000.tif"]
+  hbranch_path: "/path/to/hbranch"
+```
 
-## Images enhancement
-<details>
-<summary><code><b> click here </b></code></summary>
+### Processing Parameters
+```yaml
+assemble_params:
+  C: [32, 32, 32]     # Cropped pixels
+  S: [64, 64, 64]     # Overlapping pixels
+  dx_shape: [32, 256, 256]  # Inference patch size
+  zrange: [0, 449]    # Z coordinate range
+  xrange: [0, 769]    # X coordinate range
+  yrange: [0, 769]    # Y coordinate range
+```
 
-    - Test single image
-        - Encoder + Decoder : Call "test_model" ex: tester.test_model(x0, [None, 'transpose', 'flipX', 'flipY'])
-        - Encode : Call "test_ae_encode" ex: reconstructions, ori, hbranch = tester.test_ae_encode(x0)
-        - latent Z : Call "test_ae_decode" ex: out_all, out_seg_all = self.test_ae_decode(hbranch_data, input_augmentation)
-    - Test multiple images
-        - Call tester.test_assemble(x0, mode)
-        - Encoder + Decoder : mode="full"
-        - Encode : mode="encode"
-        - latent Z : mode="decode"
-</details>
+## Usage
 
-## Assemble images
-<details>
-<summary><code><b> click here </b></code></summary>
+### Encoding (test_only.py)
 
-    - Assemble patch to large images
-    Ex : tester.show_or_save_assemble_microscopy(zrange=zrange, xrange=xrange, yrange=yrange,
-                                            source=os.path.join(tester.config['DESTINATION'], tester.kwargs["dataset"], 'cycout/xy/'),
-                                            output_path="xy_slice_folder"
-                                            )
-        - Note that: if using tiff method, output_path should br a folder
-</details>
+For encoding operations that convert input images to latent representations:
 
-## Example usage
-<details>
-<summary><code><b> click here </b></code></summary>
+```bash
+python test_only.py --gpu --config config_name --save ori recon xy --augmentation decode --fp16 --option DPM --testcube
+```
+
+**Key Parameters:**
+- `--gpu`: Enable GPU acceleration
+- `--config`: Configuration file name (without .yaml extension)
+- `--save`: Output types (ori, recon, xy, seg)
+- `--augmentation`: Augmentation strategy (decode recommended for speed)
+- `--fp16`: Use half-precision for faster inference
+- `--option`: Model variant (DPM or VMAT)
+- `--testcube`: Enable full volume processing
+
+### Decoding (test_assemble.py)
+
+For decoding operations that reconstruct images from latent representations:
+
+```bash
+python test_assemble.py --gpu --config config_name --augmentation decode --fp16 --option DPM --reslice
+```
+
+**Key Parameters:**
+- `--gpu`: Enable GPU acceleration
+- `--config`: Configuration file name
+- `--augmentation`: Augmentation strategy
+- `--fp16`: Use half-precision
+- `--option`: Model variant
+- `--reslice`: Reslice original images
+
+## Supported Data Formats
+
+### Input Formats
+- **2D TIFF**: Individual 2D images
+- **3D TIFF**: 3D image stacks
+- **2D Zarr**: 2D Zarr arrays
+- **3D Zarr**: 3D Zarr arrays (supports 100GB+ datasets)
+
+### Output Formats
+- **TIFF**: Standard TIFF format
+- **Zarr**: Compressed Zarr format with Blosc compression
+- **No Save**: Process without saving (for testing)
+
+### Data Types
+- **float32**: Full precision (default)
+- **uint16**: 16-bit unsigned integer
+- **uint8**: 8-bit unsigned integer
+
+## Performance Benchmarks (100GB Dataset)
+
+### Encoding Performance (A6000 Single GPU, Latent Stored as Zarr)
+
+| Input Patch Size | Latent Size | Total Time | Time per Patch |
+|:----------------:|:-----------:|:----------:|:--------------:|
+| 32×256×256 | 32×4×32×32 | 4238s |    0.1948s     |
+| 48×384×384 | 48×4×48×48 | 2872s |    0.5249s     |
+
+### Decoding Performance (A6000 GPU, Output Saved as TIFF)
+
+| Input Latent Size | Output Size | GPUs | Total Time | Time per Patch |
+|:-----------------:|:-----------:|:----:|:----------:|:--------------:|
+| 32×4×32×32 | 256³ | 1 | 15241s | 0.7007s |
+| 48×4×48×48 | 384³ | 1 | 13457s | 2.4594s |
+| 48×4×48×48 | 384³ | 2 | 8419s | 1.5386s |
+| 48×4×48×48 | 384³ | 4 | 6039s | 1.1038s |
+
+**Note**: Saving as Zarr format will be slower than TIFF due to compression overhead.
+
+## Multi-GPU Processing
+
+The decoding pipeline (`test_assemble.py`) supports multi-GPU processing:
+
+1. **Data Distribution**: Input data is distributed across available GPUs
+2. **Parallel Processing**: Each GPU processes different patches simultaneously
+3. **Result Assembly**: Results are collected and assembled into final output
+4. **Memory Efficient**: Uses queue-based processing to manage memory
+
+## Configuration Examples
+
+### Basic Configuration
+```yaml
+DEFAULT:
+  SOURCE: '/path/to/models'
+  DESTINATION: '/path/to/output'
+  N_resolution: 8
+  N_GPUS: 2
+  
+  upsample_params:
+    size: [32, 256, 256]
     
-    CUDA_VISIBLE_DEVICES=3 python test_combine_o.py --prj /1dpm/ --epoch 1100 --model_type AE --gpu --hbranchz --assemble --assemble_method tiff --config config_122924 --save ori seg
-</details>
+  patch_range:
+    d0: [189, 120, 400]
+    dx: [32, 256, 256]
+    
+  norm_method: ["exp", "11"]
+  trd: [[100, 424], [0, 4]]
+```
+
+### Model-Specific Configuration
+```yaml
+DPM:
+  dataset: "DPM4X"
+  prj: "DPM4X/ae/cut/1/"
+  epoch: 800
+  model_type: AE
+  hbranchz: true
+  image_path: ["/ori/3-2ROI000.tif", "/ft0/3-2ROI000.tif"]
+  hbranch_path: "/path/to/hbranch"
+```
+
+## Advanced Features
+
+### Data Normalization
+- **Exponential normalization**: For fluorescence data
+- **Standard normalization**: Min-max scaling
+- **Custom thresholds**: Configurable normalization parameters
+
+### Augmentation Strategies
+- **None**: No augmentation
+- **Transpose**: Spatial transposition
+- **FlipX/FlipY**: Horizontal/vertical flipping
+- **Combined**: Multiple augmentations for ensemble results
+
+### Memory Management
+- **Chunked Processing**: Large datasets processed in chunks
+- **Queue-based I/O**: Asynchronous file writing
+- **GPU Memory Optimization**: Efficient memory usage across GPUs
+
+## Troubleshooting
+
+### Common Issues
+1. **CUDA Out of Memory**: Reduce batch size or use fewer GPUs
+2. **File Not Found**: Check configuration paths
+3. **Zarr Errors**: Ensure Zarr files are properly formatted
+
+### Performance Tips
+1. Use `--fp16` for faster inference
+2. Use `--augmentation decode` for better performance
+3. Configure appropriate chunk sizes for Zarr files
+4. Use multiple GPUs for large datasets
+
+## Example Commands
+
+```bash
+# Encode with full precision
+python test_only.py --gpu --config config_dpm --save ori recon xy --augmentation decode --option DPM --testcube
+
+# Decode with half precision and multiple GPUs
+python test_assemble.py --gpu --config config_dpm --augmentation decode --fp16 --option DPM --reslice
+```
+
+## License
+
+This project is for research purposes. Please ensure you have appropriate licenses for any models or datasets used.
